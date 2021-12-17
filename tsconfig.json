@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {
+        "moduleResolution": "Node",
+        "module": "CommonJS",
+        "target": "ES2021",
+        "strict": true,
+        "alwaysStrict": true,
+        "allowSyntheticDefaultImports": true,
+        "esModuleInterop": true,
+        "isolatedModules": true
+    },
+    "include": ["src", "types"],
+    "exclude": ["node_modules"]
+}
