@@ -1,6 +1,7 @@
 // Import Dependencies
 import axios from "axios";
 import cheerio from "cheerio";
+import { writeFile } from "fs/promises";
 import { Category } from "./constants";
 import { getProductDetails, listCategoryProducts } from "./extractors/amazon";
 import { AMAZON_URL } from "./extractors/amazon";
@@ -12,6 +13,7 @@ import { AMAZON_URL } from "./extractors/amazon";
     // });
     console.log("Requesting");
     const res = await listCategoryProducts(Category.GPU);
-    const p1 = await getProductDetails(res[0]);
-    console.log(p1);
+    const prods = await Promise.all(res.map(getProductDetails));
+    console.log(prods);
+    // await writeFile("result.json", JSON.stringify(prods));
 })().then(process.exit.bind(process, 0));
