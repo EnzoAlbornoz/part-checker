@@ -16,11 +16,11 @@ export interface ProductInfo {
     id: ProductId;
     title: string;
     description: string;
+    images: Array<string>;
     price?: number;
     available: boolean;
     shipsFrom: string;
     soldBy: string;
-
     technicalDetails: Record<string, string>;
     dimensions?: ProductDimensions;
     weight?: number;
@@ -34,6 +34,20 @@ export interface ProductInfo {
 export const AMAZON_URL = "https://www.amazon.com";
 const amzClient = axios.create({
     baseURL: AMAZON_URL,
+    headers: {
+        authority: "www.amazon.com",
+        pragma: "no-cache",
+        "cache-control": "no-cache",
+        dnt: "1",
+        "upgrade-insecure-requests": "1",
+        "user-agent":
+            "Mozilla/5.0 (X11; CrOS x86_64 8172.45.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.64 Safari/537.36",
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-dest": "document",
+        "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+    },
 });
 // Define Mappings
 const categoryMapping: Record<Category, number> = {
@@ -187,12 +201,36 @@ export async function getProductDetails(
                 productWeight = Number(weight);
         }
     }
+    // Get Images
+    let productImages = $(`[class^="image item itemNo"] img`)
+        .toArray()
+        .map((img) => $(img).attr("src"))
+        .filter((imgUrl): imgUrl is string => imgUrl !== undefined);
+    try {
+        // Fetch High Resolution Images
+        const alternativeProductImages: string[] = JSON.parse(
+            page
+                .match(/'colorImages': ({ 'initial': \[.*\]}),/)
+                ?.at(1)
+                ?.replace("'initial'", `"initial"`) || "{}"
+        )?.initial?.map(
+            (imgMeta: { large: string; thumb: string; hiRes: string }) =>
+                imgMeta.hiRes
+        );
+        productImages =
+            alternativeProductImages.length >= productImages.length
+                ? alternativeProductImages
+                : productImages;
+    } catch (error) {
+        console.warn("Error while fetching hiResImages: ", error);
+    }
     // Build Final Payload
     const productInfo: ProductInfo = {
         url: new URL(`dp/${productId}`, amzClient.defaults.baseURL).toString(),
         id: productId,
         title: productTitle,
         description: productDescription,
+        images: productImages,
         price: Number(productPrice),
         available: productAvailable,
         shipsFrom: productShipsFrom,
