@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # database:
+  #   image: mongo:4
+  #   env_file: "./.env"
+  #   container_name: mongodb
+  #   hostname: mongodb
+  #   ports:
+  #     - "27017:27017"
+  #   healthcheck:
+  #     test: test $$(echo "rs.initiate().ok || rs.status().ok" | mongo -u $${MONGO_INITDB_ROOT_USERNAME} -p $${MONGO_INITDB_ROOT_PASSWORD} --quiet) -eq 1
+  #     interval: 10s
+  #     start_period: 30s
+  #   command: "--bind_ip_all --keyFile /opt/db_keyfile --replSet rs0"
+  #   volumes:
+  #     - "partchecker_db_mongo:/data/db"
+  mongodb-primary:
+    image: "bitnami/mongodb:5.0"
+    environment:
+        MONGODB_REPLICA_SET_MODE: primary
+        MONGODB_REPLICA_SET_NAME: rs0
+        MONGODB_REPLICA_SET_KEY: 1234567890
+
+        MONGODB_ADVERTISED_HOSTNAME: mongodb-primary
+
+        MONGODB_ROOT_USER: partChecker
+        MONGODB_ROOT_PASSWORD: partChecker
+
+        MONGODB_USERNAME: partChecker
+        MONGODB_PASSWORD: partChecker
+        MONGODB_DATABASE: partChecker
+
+    ports:
+      - "27017:27017"
+    volumes:
+      - "partchecker_db_mongo:/bitnami/mongodb"
+
+  mongodb-secondary:
+    image: "bitnami/mongodb:5.0"
+    depends_on:
+      - mongodb-primary
+    environment:
+        MONGODB_REPLICA_SET_MODE: secondary
+        MONGODB_ADVERTISED_HOSTNAME: mongodb-secondary
+
+        MONGODB_REPLICA_SET_NAME: rs0
+        MONGODB_REPLICA_SET_KEY: 1234567890
+
+        MONGODB_INITIAL_PRIMARY_HOST: mongodb-primary
+        MONGODB_INITIAL_PRIMARY_ROOT_USERNAME: partChecker
+        MONGODB_INITIAL_PRIMARY_ROOT_PASSWORD: partChecker
+
+  mongodb-arbiter:
+    image: "bitnami/mongodb:5.0"
+    depends_on:
+      - mongodb-primary
+    env_file: "./.env.mongo-worker"
+    environment:
+        MONGODB_REPLICA_SET_MODE: arbiter
+        MONGODB_ADVERTISED_HOSTNAME: mongodb-arbiter
+
+        MONGODB_REPLICA_SET_NAME: rs0
+        MONGODB_REPLICA_SET_KEY: 1234567890
+
+        MONGODB_INITIAL_PRIMARY_HOST: mongodb-primary
+        MONGODB_INITIAL_PRIMARY_ROOT_USERNAME: partChecker
+        MONGODB_INITIAL_PRIMARY_ROOT_PASSWORD: partChecker
+
+  proxy:
+    image: dperson/torproxy
+    ports:
+      - "8118:8118"
+      - "9050:9050"
+      - "9051:9051"
+
+  # kv:
+  #   image: redis:alpine
+  #   ports:
+  #     - "6379:6379"
+
+volumes:
+  partchecker_db_mongo:

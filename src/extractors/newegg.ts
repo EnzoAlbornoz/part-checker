@@ -34,11 +34,11 @@ export interface ProductInfo {
     countryOfOrigin?: string;
 }
 // Define Constants
-export const AMAZON_URL = "https://www.amazon.com";
-const amzClient = axios.create({
-    baseURL: AMAZON_URL,
+export const NEWEGG_URL = "https://newegg.com";
+const nggClient = axios.create({
+    baseURL: NEWEGG_URL,
     headers: {
-        authority: "www.amazon.com",
+        authority: "newegg.com",
         pragma: "no-cache",
         "cache-control": "no-cache",
         dnt: "1",
@@ -57,16 +57,16 @@ const amzClient = axios.create({
             locales: ["en-US", "en"],
         }).getHeaders(),
     },
-    httpsAgent: new HttpsProxyAgent({
-        host: env.PROXY_HOST || "localhost",
-        port: Number(env.PROXY_PORT || "8118"),
-    }),
+    // httpsAgent: new HttpsProxyAgent({
+    //     host: env.PROXY_HOST || "localhost",
+    //     port: Number(env.PROXY_PORT || "8118"),
+    // }),
 });
 // Define Mappings
 const categoryMapping: Record<Category, number> = {
-    CPU: 229189,
-    GPU: 284822,
-    MEM: 172500,
+    CPU: 343,
+    GPU: 48,
+    MEM: 147,
 };
 // Define Interface Functions
 export async function robotsInfo() {
@@ -80,24 +80,24 @@ export async function listCategoryProducts(
     // Map Category
     const categoryId = categoryMapping[category];
     // Fetch Page
-    const { data: page } = await amzClient.get<string>(
-        paginationIndex > 1 ? "s" : "b",
-        {
-            params:
-                paginationIndex > 1
-                    ? { rh: `n:${categoryId}`, page: paginationIndex }
-                    : { node: categoryId },
-        }
+    const { data: page } = await nggClient.get<string>(
+        `x/SubCategory/ID-${categoryId}/${
+            paginationIndex > 1 ? `Page-${paginationIndex}` : ""
+        }`
     );
     // Parse HTML
     const $ = cheerio.load(page);
     // Find List of Products Nodes
-    const productsNodes = $(`[data-component-type="s-search-result"]`)
+    const productsNodes = $(`.item-cell > .item-container`)
         .toArray()
-        .filter((node) => (!onlyWithPrice ? true : $(node).has(".a-price")));
-
+        .filter((node) => !$(node).has(".item-sponsored-box").length);
     // Get Product Ids
-    const ids = productsNodes.map((node) => node.attribs["data-asin"]);
+    const ids = productsNodes
+        .map(
+            (node) =>
+                $("a", node).first().attr("href")?.split("/").at(-1) || null
+        )
+        .filter((id): id is string => id !== null);
     // Return Product Ids
     return ids;
 }
@@ -106,61 +106,66 @@ export async function getProductDetails(
     productId: ProductId
 ): Promise<ProductInfo> {
     // Fetch Page
-    const { data: page } = await amzClient.get<string>(`dp/${productId}`);
+    const { data: page } = await nggClient.get<string>(`x/p/${productId}`);
     // Parse HTML
     const $ = cheerio.load(page);
     // Get Title
-    const productTitle = $("#productTitle").text().trim();
+    const productTitle = $(".product-title").text().trim();
     // Get Description
-    const productDescription = $("#productDescription")
+    const productDescription = $(".product-bullets > ul")
         .text()
         .trim()
         .replaceAll("\n", "")
         .replace(/\s\s+/g, " ");
     // Get Price
-    const productPrice = $(`.a-price > [aria-hidden="true"]`)
+    const productPrice = $(`.price-current`)
         .first()
         .text()
         .trim()
-        .replace("$", "");
+        .replace("$", "")
+        .replace(",", "");
+    console.log(productPrice);
     // Get Availability
-    const availabilityText = $(`#availability`).text().trim();
-    const productAvailable =
-        /^(?:In Stock.?)|(?:Only \d* left in stock(?: - order soon.?)?)$/.test(
-            availabilityText
-        );
+    const availabilityText = $(`.product-flag`).text().trim();
+    const productAvailable = !/OUT OF STOCK/.test(availabilityText);
     // Get Ships From
-    const productShipsFrom = $(
-        `.tabular-buybox-text[tabular-attribute-name="Ships from"]`
+    const productShipsFrom = (
+        $(".product-pane .shipped-by-newegg").toArray().length
+            ? $(".product-pane .shipped-by-newegg")
+            : $(".product-pane .product-seller strong")
     )
+        .first()
         .text()
         .replaceAll("\n", "")
         .replaceAll("\u200E", "")
+        .replaceAll(/shipped by/gi, "")
         .trim();
     // Get Sold By
-    const productSoldBy = $(
-        `.tabular-buybox-text[tabular-attribute-name="Sold by"]`
-    )
+    const productSoldBy = $(`.product-pane .product-seller strong`)
+        .first()
         .text()
         .replaceAll("\n", "")
         .replaceAll("\u200E", "")
         .trim();
     // Get Product Techical Attributes
+    const specsTabIndex = $("#product-details > .tab-navs > .tab-nav")
+        .toArray()
+        .map((el) => $(el).text())
+        .findIndex((txt) => txt.toLowerCase() === "specs");
     const {
-        productDimensions: dimensionsProduct,
-        packageDimensions: dimensionsPackage,
-        itemDimensions: dimensionsItem,
         brand: productBrand,
-        manufacturer: productManufacturer,
-        countryOfOrigin,
         dateFirstAvailable,
-        itemWeight,
-        itemModelNumber,
-        asin: _asin,
-        itemDimensionsLxwxh: _itemDimensionsLxwxh,
+        model: itemModelNumber,
+        chipsetManufacturer,
+        cardDimensionsLXH: dimensions,
         ...productTechnicalDetails
     } = Object.fromEntries(
-        $(`[id^='productDetails_techSpec'] > tbody > tr`)
+        $(
+            ".table-horizontal > tbody > tr",
+            $("#product-details > .tab-panes > .tab-pane").toArray()[
+                specsTabIndex
+            ]
+        )
             .toArray()
             .map((el) => [
                 camelCase(
@@ -173,80 +178,40 @@ export async function getProductDetails(
                 ),
                 $("td", el)
                     .text()
-                    .replaceAll("\n", "")
+                    .replaceAll("\n", " ")
                     .replaceAll("\u200E", "")
                     .trim(),
             ])
     );
     // Get Dimensions
     let productDimensions: ProductDimensions | undefined = undefined;
-    const dimensionsArray = (
-        dimensionsItem ||
-        dimensionsProduct ||
-        dimensionsPackage
-    )
-        ?.split("x")
-        ?.flatMap((slice) => slice.trim().split(" "));
-    if (dimensionsArray) {
-        const [length, width, height, metric] = dimensionsArray;
-        switch (metric) {
-            case "inches":
-                productDimensions = {
-                    length: Number(length) * INCHES_TO_METER,
-                    width: Number(width) * INCHES_TO_METER,
-                    height: Number(height) * INCHES_TO_METER,
-                };
-                break;
-            default:
-                // Meters
-                productDimensions = {
-                    length: Number(length),
-                    width: Number(width),
-                    height: Number(height),
-                };
-                break;
-        }
+    if (dimensions) {
+        const [l, h] = dimensions.replaceAll(`"`, "").split("x").map(Number);
+        productDimensions = {
+            length: l,
+            height: h,
+            width: 0,
+        };
     }
     // Get Weight
-    let productWeight: number | undefined = undefined;
-    const weightArray = itemWeight?.split(" ");
-    if (weightArray) {
-        const [weight, metric] = weightArray;
-        switch (metric) {
-            case "pounds":
-                productWeight = Number(weight) * POUNDS_TO_KILOS;
-                break;
-            default:
-                // Kilos
-                productWeight = Number(weight);
-        }
-    }
+    const productWeight: number | undefined = undefined;
     // Get Images
-    let productImages = $(`[class^="image item itemNo"] img`)
+    const productImages = $(`.mainSlide .swiper-slide img`)
         .toArray()
         .map((img) => $(img).attr("src"))
         .filter((imgUrl): imgUrl is string => imgUrl !== undefined);
-    try {
-        // Fetch High Resolution Images
-        const alternativeProductImages: string[] = JSON.parse(
-            page
-                .match(/'colorImages': ({ 'initial': \[.*\]}),/)
-                ?.at(1)
-                ?.replace("'initial'", `"initial"`) || "{}"
-        )?.initial?.map(
-            (imgMeta: { large: string; thumb: string; hiRes: string }) =>
-                imgMeta.hiRes
-        );
-        productImages =
-            alternativeProductImages.length >= productImages.length
-                ? alternativeProductImages
-                : productImages;
-    } catch (error) {
-        console.warn("Error while fetching hiResImages: ", error);
-    }
+    // Get Country of Origin
+    const countryOfOrigin = $(
+        ".product-wrap .product-info-group .product-ship-from"
+    )
+        .first()
+        .text()
+        .replace(/ships from/i, "")
+        .replace(".", "")
+        .trim();
     // Build Final Payload
     const productInfo: ProductInfo = {
-        url: new URL(`dp/${productId}`, amzClient.defaults.baseURL).toString(),
+        url: new URL(`x/p/${productId}`, nggClient.defaults.baseURL).toString(),
         id: productId,
         title: productTitle,
         description: productDescription,
@@ -259,7 +224,7 @@ export async function getProductDetails(
         dimensions: productDimensions,
         weight: productWeight,
         brand: productBrand,
-        manufacturer: productManufacturer,
+        manufacturer: chipsetManufacturer,
         dateFirstAvailable: dateFirstAvailable
             ? dayjs(dateFirstAvailable).toDate()
             : undefined,
